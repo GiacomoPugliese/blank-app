@@ -37,20 +37,31 @@ def build_system(prompt, docs):
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
     with st.chat_message("assistant"):
         if not api_key:
-            st.write("Please add your OpenAI API key.")
+            st.markdown("Please add your OpenAI API key.")
         else:
             payload = {
                 "model": model,
-                "messages": [{"role": "system", "content": build_system(system_prompt, st.session_state.docs)}] + st.session_state.messages,
+                "messages": [
+                    {"role": "system", "content": build_system(system_prompt, st.session_state.docs)}
+                ] + st.session_state.messages,
                 "temperature": 0.3
             }
             headers = {
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json"
             }
-            resp = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, data=json.dumps(payload), timeout=60)
-            content = resp.json()["choices"][0]["message"]["content"].strip() if resp.status_code == 200 else f"Error {resp.status_code}: {resp.text}"
+            resp = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                data=json.dumps(payload),
+                timeout=60
+            )
+            content = resp.json()["choices"][0]["message"]["content"].strip() \
+                     if resp.status_code == 200 else f"Error {resp.status_code}: {resp.text}"
             st.markdown(content)
             st.session_state.messages.append({"role": "assistant", "content": content})
