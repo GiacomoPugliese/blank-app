@@ -1,8 +1,7 @@
 import json, ast, textwrap, requests, streamlit as st
 from datetime import datetime
 
-# ───────── DEV‑ONLY OPENAI KEY ─────────
-API_KEY = ""
+
 
 # ───────── Enhanced knowledge base ─────────
 DEFAULT_KB = textwrap.dedent("""
