@@ -2,7 +2,7 @@ import json, ast, textwrap, requests, streamlit as st
 from datetime import datetime
 
 # ───────── DEV‑ONLY OPENAI KEY ─────────
-API_KEY = "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"
+API_KEY = ""
 
 # ───────── Enhanced knowledge base ─────────
 DEFAULT_KB = textwrap.dedent("""
