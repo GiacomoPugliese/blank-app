@@ -1,0 +1,5 @@
+Corolla | Compact Sedan | MSRP 21000 | 32 city / 41 hwy mpg
+Camry | Midsize Sedan | MSRP 26000 | 28 city / 39 hwy mpg
+RAV4  | Compact SUV   | MSRP 28500 | 27 city / 35 hwy mpg
+Prius | Hybrid Hatch  | MSRP 28000 | 57 city / 56 hwy mpg
+Tacoma| Midsize Truck | MSRP 31500 | 20 city / 24 hwy mpg
