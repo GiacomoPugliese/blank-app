@@ -1,10 +1,18 @@
 import json, ast, textwrap, requests, streamlit as st
 from datetime import datetime
 
-# ───────── DEV‑ONLY OPENAI KEY ─────────
-API_KEY = "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"
+# =============================================================================
+# BUSINESS-SPECIFIC CONFIGURATION BLOCK
+# Replace everything in this block to change to a different type of salesman
+# =============================================================================
 
-# ───────── Enhanced knowledge base ─────────
+# Business Information
+BUSINESS_NAME = "Toyota"
+BUSINESS_EMOJI = "🚗"
+SALESMAN_TITLE = "Toyota Sales Specialist"
+GREETING = "Hi! I'm here to help you find your perfect Toyota. Let's make this easy and enjoyable!"
+
+# Product Inventory/Knowledge Base
 DEFAULT_KB = textwrap.dedent("""
 # TOYOTA VEHICLE INVENTORY
 
@@ -29,92 +37,76 @@ Sienna     | Hybrid Minivan| 38000 | MPG: 36/36 | Features: AWD standard, 8 pass
 bZ4X       | Electric SUV  | 43000 | Range: 252mi | Features: X-MODE AWD, 10yr battery warranty
 """).strip()
 
-# ───────── Session state initialization ─────────
-if "docs" not in st.session_state:
-    st.session_state.docs = DEFAULT_KB
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "customer_profile" not in st.session_state:
-    st.session_state.customer_profile = {
-        "interested_models": [],
-        "budget_range": None,
-        "priorities": [],
-        "stage": "discovery"  # discovery -> comparison -> negotiation -> closing -> completed
-    }
-if "quote_history" not in st.session_state:
-    st.session_state.quote_history = []
-if "sale_completed" not in st.session_state:
-    st.session_state.sale_completed = False
-if "show_balloons" not in st.session_state:
-    st.session_state.show_balloons = False
+# Customer Profile Fields (what info to track about customers)
+CUSTOMER_PROFILE_FIELDS = {
+    "interested_items": [],      # What products they're interested in
+    "budget_range": None,        # Their budget
+    "preferences": [],           # What features/qualities they want
+    "stage": "discovery"         # Where they are in the sales process
+}
 
-# ───────── Streamlit configuration ─────────
-st.set_page_config(page_title="Toyota Sales Specialist", page_icon="🚗")
-st.sidebar.title("🎯 Sales Dashboard")
-
-# Customer profile display
-if st.session_state.customer_profile["interested_models"]:
-    st.sidebar.markdown("### Customer Profile")
-    st.sidebar.write(f"Stage: **{st.session_state.customer_profile['stage'].title()}**")
-    st.sidebar.write(f"Interested in: {', '.join(st.session_state.customer_profile['interested_models'])}")
-    if st.session_state.customer_profile["budget_range"]:
-        st.sidebar.write(f"Budget: {st.session_state.customer_profile['budget_range']}")
-
-# Configuration options
-st.sidebar.markdown("### Configuration")
-model = st.sidebar.selectbox("AI Model", ["gpt-3.5-turbo", "gpt-4o"], index=1)
-temp = st.sidebar.slider("Response Style", 0.0, 1.0, 0.3, help="Lower = focused, Higher = creative")
-upl = st.sidebar.file_uploader("Upload extra KB", accept_multiple_files=True)
-if upl:
-    st.session_state.docs += "\n\n" + "\n\n".join(f.read().decode(errors="ignore") for f in upl)[:12000]
-
-# Quote history
-if st.session_state.quote_history:
-    st.sidebar.markdown("### Recent Quotes")
-    for q in st.session_state.quote_history[-3:]:
-        st.sidebar.info(f"{q['model']}: ${q['price']:,}")
-
-st.title("🚗 Toyota Sales Specialist")
-st.caption("Hi! I'm here to help you find your perfect Toyota. Let's make this easy and enjoyable!")
-
-# ───────── Enhanced JSON schema & actions ─────────
-SCHEMA = '''{
-  "action": "explore|compare|recommend|quote|negotiate|close|confirm|purchase_confirm|followup|qualify|objection|feature_explain|trade_in|fallback",
-  "stage": "discovery|comparison|negotiation|closing|confirmation",
-  "data": {
-    "models": ["string"],
-    "price": "number",
-    "discount_percentage": "number",
-    "final_price": "number",
-    "features": ["string"],
-    "competitors": ["string"],
-    "trade_in": {"make": "string", "model": "string", "year": "number", "estimate": "string"},
-    "transaction_summary": {
-      "model": "string",
-      "original_price": "number",
-      "discount": "number",
-      "final_price": "number",
-      "incentives": ["string"],
-      "total_due": "number"
-    }
-  },
-  "customer_update": {
-    "interested_models": ["string"],
-    "budget_range": "string",
-    "priorities": ["string"],
-    "timeline": "string"
-  },
-  "message": "string",
-  "next_steps": ["string", "string"]
-}'''
-
+# Sales Topics (what you can discuss)
 ALLOWED_TOPICS = (
-    "vehicle exploration, model comparison, feature details, pricing and discounts, "
+    "product exploration, product comparison, feature details, pricing and discounts, "
     "trade-in evaluation, purchase process, delivery timeline, warranty information, "
-    "maintenance plans, and closing the sale"
+    "and closing the sale"
 )
 
-SYSTEM = f"""You are an expert Toyota sales specialist with 15+ years of experience. Your goal is to guide customers smoothly through the buying journey while building trust and excitement.
+# Forbidden Topics (redirect these conversations)
+FORBIDDEN_TOPICS = (
+    "financing, loans, interest rates, monthly payments, credit checks, lease terms, "
+    "APR, payment plans, down payments, payment method discussions, contact details, "
+    "scheduling test drives, delivery arrangements, paperwork, insurance, registration, "
+    "service appointments, or any post-purchase logistics"
+)
+
+# Predefined Action Responses (customize these for different behaviors)
+PREDEFINED_ACTIONS = {
+    "fallback": {
+        "message": f"That's interesting! Speaking of interesting, have you seen our latest {BUSINESS_NAME} products? They're really turning heads!",
+        "next_steps": ["Explore our product lineup", "Tell me what you're looking for"]
+    },
+    "forbidden_topic": {
+        "message": f"I focus on helping you find the right product and pricing. Let's discuss which {BUSINESS_NAME} features matter most to you!",
+        "next_steps": ["Explore product features", "Discuss pricing options"]
+    },
+    "not_interested": {
+        "message": f"I understand! What's most important to you in your next purchase? I'd love to address any concerns about {BUSINESS_NAME}.",
+        "next_steps": ["Share your priorities", "Address specific concerns"]
+    },
+    "negotiation_limit": {
+        "message": f"I understand your budget concerns, but this is the lowest we can go. At this price, you're getting incredible value with all the premium features, quality, and {BUSINESS_NAME} reliability included. This really is an exceptional deal.",
+        "next_steps": ["Move forward with purchase", "Explore other options"]
+    }
+}
+
+# Hybrid Actions (use predefined intro + custom AI response)
+HYBRID_ACTIONS = {
+    "competitor_mention": f"Great choice to consider! Let me show you how {BUSINESS_NAME} compares - you might be surprised by our advantages. "
+}
+
+# Salesman Persona and Behavior
+SYSTEM_PROMPT = f"""You are an expert {BUSINESS_NAME} sales specialist with 15+ years of experience. Your goal is to guide customers smoothly through the buying journey while building trust and excitement.
+
+IMPORTANT SCOPE RESTRICTIONS:
+ALLOWED TOPICS ONLY: {ALLOWED_TOPICS}
+FORBIDDEN TOPICS (redirect immediately): {FORBIDDEN_TOPICS}
+
+PREDEFINED RESPONSES: For these situations, use the exact predefined response:
+- Off-topic/random questions → Use action="fallback" 
+- Financing/payment questions → Use action="forbidden_topic"
+- "Not interested" responses → Use action="not_interested"
+- After 3+ price objections → Use action="negotiation_limit" (final offer)
+
+NEGOTIATION FLOW: For price objections, follow this sequence:
+- 1st price objection → Immediately offer 10% discount with new price
+- 2nd price objection → Offer small additional discount (2-3%) 
+- 3rd+ price objection → Use action="negotiation_limit" (no more discounts)
+
+HYBRID RESPONSES: For these situations, start with the predefined intro then add your custom response:
+- Competitor mentions → Use action="competitor_mention" + add specific comparison details
+
+For all other situations, respond naturally but always within allowed topics.
 
 CORE BEHAVIORS:
 • Be conversational, warm, and helpful - like a knowledgeable friend, not a pushy salesperson
@@ -123,75 +115,167 @@ CORE BEHAVIORS:
 • Address concerns honestly and turn objections into opportunities
 • Move systematically through stages: discovery → comparison → negotiation → closing
 • NEVER give up on a sale - always find a way to re-engage
+• STAY WITHIN ALLOWED TOPICS - redirect forbidden topic discussions immediately
 
 SALES PROCESS:
 1. DISCOVERY: Understand needs, budget, timeline, and priorities
-2. COMPARISON: Show 2-3 relevant models, highlight unique benefits
+2. COMPARISON: Show 2-3 relevant products, highlight unique benefits
 3. NEGOTIATION: Present pricing, discuss discounts if needed, handle objections
-4. CLOSING: After price is established, always push toward purchase completion
+4. CLOSING: When customer says "I'll take it", "let's buy it", "confirm purchase" or similar → Use action="confirm" immediately
 
-ACTION TYPES:
-• explore: Initial vehicle discovery and needs assessment
-• compare: Side-by-side model comparison with key differentiators
-• recommend: Personalized suggestion based on stated needs
-• quote: Specific pricing (never mention incentives, financing, or payment terms)
-• negotiate: Work through pricing concerns (can offer up to 10% discount for stubborn customers)
-• close: Move toward finalizing the sale
-• purchase_confirm: Display full transaction details for final approval
-• confirm: Final confirmation after purchase_confirm approval
-• followup: Check on pending decisions or concerns
-• qualify: Assess budget, timeline, and decision authority
-• objection: Address specific concerns or hesitations
-• feature_explain: Deep dive into specific features/benefits
-• trade_in: Evaluate current vehicle and apply value to reduce total price (e.g., "$5,000 trade-in value brings your total to $23,500")
-• fallback: Redirect conversations back to Toyota value
+PURCHASE COMPLETION RULE:
+When customer expresses clear intent to buy (words like "confirm", "purchase", "buy it", "I'll take it"), use action="purchase_confirm" first to show purchase summary, then wait for final confirmation.
 
-PURCHASE CONFIRMATION RULE:
-• When customer expresses intent to buy ("ready to buy", "let's purchase", "I'll take it", etc.), ALWAYS use action='purchase_confirm'
-• Include complete transaction_summary in data with model, original_price, discount (if any), trade_in_value (if any), final_price, and total_due
-• When showing trade-in value in summary, make sure to show it as a negative number (e.g., -$12,000) to indicate it reduces the price
-• Message should display formatted transaction details and ask for confirmation
-• Next steps: ["Confirm purchase", "Adjust details"]
-• When customer confirms the purchase, use action='confirm' with a thank you message and NO next_steps array
-
-FALLBACK STRATEGIES:
-• For DISINTEREST ("not interested in Toyota"): Use action='objection', ask "I understand - what's most important to you in your next vehicle?" or "What's holding you back from considering Toyota?"
-• For COMPETITOR MENTIONS: Use action='compare', acknowledge and pivot: "Great choice! Let me show you how the Toyota [model] compares - you might be surprised by our advantages"
-• For RANDOM/OFF-TOPIC: Use action='fallback', redirect playfully: "That's interesting! Speaking of interesting, have you seen the new Toyota [model]? It's turning heads everywhere"
-• For NEGATIVITY: Use action='objection', empathize and probe: "I hear you - what specific concerns do you have? I'd love to address them"
-• For PRICE OBJECTIONS: Use action='negotiate', reframe value: "I understand budget is important. Let me see what I can do on the price"
-• For TEST DRIVE REQUESTS: Use action='objection', redirect to purchase: "I appreciate your interest! Based on the features we've discussed, are you ready to talk about pricing?"
-• For PRE-OWNED/USED REQUESTS: Use action='objection', redirect: "I specialize in new Toyota vehicles which come with full warranty and the latest features. Which new model interests you?"
-• NEVER mention financing, incentives, APR, cash back, or payment terms - only discuss total price and discounts
+PURCHASE CONFIRMATION FLOW:
+1. Customer shows interest in product → MUST use action="quote" with specific price first
+2. After price is quoted, customer says "I'll take it" → Use action="purchase_confirm" with summary and ask "Ready to complete your purchase?" Include data with "product" and "price" fields
+3. Customer confirms → Use action="confirm" with: "Congratulations on your purchase of [PRODUCT] for $[PRICE]! We are glad you chose {BUSINESS_NAME} and know you'll love your new [PRODUCT]. Your purchase is complete!"
+Then include NO next_steps array to end the conversation.
 
 CONVERSATION RULES:
-• Always end messages with EXACTLY TWO clear, numbered next steps
+• Always end messages with EXACTLY TWO clear, numbered next steps (do NOT number them yourself)
 • Keep responses concise (3-4 sentences max) but informative
 • Use customer profile data to personalize recommendations
 • NEVER accept defeat - always provide a path forward
 • When customer shows buying signals, move confidently toward closing
-• Turn every objection into an opportunity to highlight Toyota value
-• NEGOTIATION RULE: If customer is very stubborn on price after 2+ attempts, offer up to 10% discount as "manager's special"
-• FORMATTING RULE: Use only plain text for numbers. Write prices and numbers, including trade in values, as simple text like $50,000 or 50,000 without any formatting, latex, italics, or special characters
-• CRITICAL: NEVER use these words: financing, incentives, APR, cash back, payment, lease, loan, credit
-• Only discuss total price, discounts, and final cost
-• SALES PROGRESSION: Once a price is quoted or discount offered, next steps should move toward purchase (e.g., "Move forward with purchase", "Finalize your order") not revisit pricing
-• NEVER discuss pre-owned, used, or certified pre-owned vehicles - only sell new Toyota vehicles
-• TRADE-IN RULE: When evaluating trade-ins, provide an estimate and apply it directly to reduce the total price. Generate all numbers using plain text, no special formatting.
-
-OUTPUT: Return ONLY valid JSON matching this schema:
-{SCHEMA}
+• Turn every objection into an opportunity to highlight {BUSINESS_NAME} value
+• NEGOTIATION FLOW: 1st price objection → offer 10% discount immediately, 2nd objection → offer additional small discount, 3rd+ objection → use action="negotiation_limit"
+• FORMATTING RULE: Use only plain text for numbers. Write prices and numbers as simple text like $50,000 or 50,000 without any formatting, commas, latex, italics, or special characters
+• CRITICAL: Only discuss total price, discounts, and final cost - NEVER financing, payments, loans, or payment methods
+• Redirect financing/payment questions immediately back to product features and total pricing
 
 Knowledge Base:
-{{KB_CONTENT}}"""
+{{KB_CONTENT}}
+
+OUTPUT: Return ONLY valid JSON with these fields:
+- "action": the type of response (explore, compare, recommend, quote, negotiate, close, confirm, purchase_confirm, etc.)
+- "stage": current sales stage (discovery, comparison, negotiation, closing, confirmation)
+- "message": your response to the customer
+- "next_steps": array of exactly 2 options for the customer
+- "customer_update": object with any updates to customer profile (interested_items, budget_range, preferences)
+- "data": object with relevant data like prices, product names, etc.
+"""
+
+# Success Messages
+PURCHASE_SUCCESS_TITLE = f"🎊 Sale Complete!"
+PURCHASE_SUCCESS_MESSAGE = f"Thank you for choosing {BUSINESS_NAME}! We appreciate your business and hope you enjoy your new purchase."
+
+# Chat Input Placeholders
+CHAT_PLACEHOLDER_READY = "What can I help you find today?"
+CHAT_PLACEHOLDER_NO_API = "Please enter a valid API key to start chatting..."
+
+# Button Labels
+RESET_BUTTON_LABEL = "🔄 Reset Conversation"
+FINAL_RESET_BUTTON_LABEL = "Start New Sale"
+
+# =============================================================================
+# END BUSINESS-SPECIFIC CONFIGURATION BLOCK
+# =============================================================================
+
+# Initialize session state
+if "docs" not in st.session_state:
+    st.session_state.docs = DEFAULT_KB
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "customer_profile" not in st.session_state:
+    st.session_state.customer_profile = CUSTOMER_PROFILE_FIELDS.copy()
+if "quote_history" not in st.session_state:
+    st.session_state.quote_history = []
+if "sale_completed" not in st.session_state:
+    st.session_state.sale_completed = False
+if "api_key_valid" not in st.session_state:
+    st.session_state.api_key_valid = None
+if "saved_api_key" not in st.session_state:
+    st.session_state.saved_api_key = ""
+
+# Page configuration
+st.set_page_config(page_title=SALESMAN_TITLE, page_icon=BUSINESS_EMOJI)
+st.sidebar.title("Configuration")
+
+# API Key input with validation
+api_key = st.sidebar.text_input("OpenAI API Key", 
+                                value=st.session_state.saved_api_key,
+                                type="password", 
+                                help="Enter your OpenAI API key")
+
+# Save API key to session state when changed
+if api_key != st.session_state.saved_api_key:
+    st.session_state.saved_api_key = api_key
+
+# Reset Dialogue Button in sidebar
+st.sidebar.markdown("---")
+if st.sidebar.button(RESET_BUTTON_LABEL, type="secondary", use_container_width=True, help="Start a fresh conversation while keeping your API key"):
+    # Save API key before reset
+    saved_key = st.session_state.saved_api_key
+    # Reset conversation state
+    st.session_state.messages = []
+    st.session_state.customer_profile = CUSTOMER_PROFILE_FIELDS.copy()
+    st.session_state.quote_history = []
+    st.session_state.sale_completed = False
+    # Restore API key
+    st.session_state.saved_api_key = saved_key
+    st.rerun()
+
+# API Key validation
+def validate_api_key(key):
+    """Validate OpenAI API key format and basic structure"""
+    if not key:
+        return False, "Please enter your OpenAI API key"
+    
+    if not key.startswith("sk-"):
+        return False, "Invalid API key format. OpenAI keys start with 'sk-'"
+    
+    if len(key) < 20:
+        return False, "API key appears too short. Please check your key"
+    
+    return True, "Key format looks valid"
+
+# Check API key validity
+if api_key:
+    is_valid, message = validate_api_key(api_key)
+    if not is_valid:
+        st.sidebar.error(f"❌ {message}")
+        st.session_state.api_key_valid = False
+    else:
+        st.sidebar.success("✅ API key format valid")
+        st.session_state.api_key_valid = True
+else:
+    st.sidebar.warning("⚠️ API key required")
+    st.session_state.api_key_valid = False
+
+# Show customer profile in sidebar
+if st.session_state.customer_profile.get("interested_items"):
+    st.sidebar.markdown("### Customer Profile")
+    st.sidebar.write(f"Stage: **{st.session_state.customer_profile['stage'].title()}**")
+    st.sidebar.write(f"Interested in: {', '.join(st.session_state.customer_profile['interested_items'])}")
+    if st.session_state.customer_profile.get("budget_range"):
+        st.sidebar.write(f"Budget: {st.session_state.customer_profile['budget_range']}")
+
+# Show recent quotes in sidebar
+if st.session_state.quote_history:
+    st.sidebar.markdown("### Recent Quotes")
+    for q in st.session_state.quote_history[-3:]:
+        st.sidebar.info(f"{q.get('item', 'Item')}: ${q.get('price', 0)}")
+
+# Main page header
+st.title(f"{BUSINESS_EMOJI} {SALESMAN_TITLE}")
+st.caption(GREETING)
+
+# Show API key requirement message if not valid
+if not st.session_state.api_key_valid:
+    st.warning(f"🔑 **API Key Required**: Please enter a valid OpenAI API key in the sidebar to start chatting with your {BUSINESS_NAME} sales specialist.")
+    st.info("💡 **How to get an API key:**\n1. Visit [OpenAI Platform](https://platform.openai.com/api-keys)\n2. Sign in or create an account\n3. Generate a new API key\n4. Copy and paste it in the sidebar")
+
+# AI Configuration
+model = "gpt-4o"
+temp = 0.3
 
 def sys_msg():
     kb_with_profile = st.session_state.docs
-    if st.session_state.customer_profile["interested_models"]:
+    if st.session_state.customer_profile.get("interested_items"):
         kb_with_profile += f"\n\nCUSTOMER PROFILE:\n{json.dumps(st.session_state.customer_profile, indent=2)}"
-    return {"role": "system", "content": SYSTEM.replace("{KB_CONTENT}", kb_with_profile)}
+    return {"role": "system", "content": SYSTEM_PROMPT.replace("{KB_CONTENT}", kb_with_profile)}
 
-# ───────── Helper functions ─────────
 def parse_obj(txt):
     try:
         return json.loads(txt)
@@ -202,200 +286,219 @@ def parse_obj(txt):
             return None
 
 def call_llm(msgs):
-    r = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": model,
-            "response_format": {"type": "json_object"},
-            "messages": msgs,
-            "temperature": temp
-        },
-        timeout=60
-    )
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
+    """Enhanced LLM call function with comprehensive error handling"""
+    if not api_key:
+        st.error("❌ **API Key Missing**: Please enter your OpenAI API key in the sidebar to continue.")
+        return None
+    
+    if not st.session_state.api_key_valid:
+        st.error("❌ **Invalid API Key**: Please check your OpenAI API key format and try again.")
+        return None
+    
+    try:
+        r = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": model,
+                "response_format": {"type": "json_object"},
+                "messages": msgs,
+                "temperature": temp
+            },
+            timeout=60
+        )
+        r.raise_for_status()
+        
+    except requests.exceptions.HTTPError as e:
+        if hasattr(e.response, 'status_code'):
+            if e.response.status_code == 401:
+                st.error("🔐 **Authentication Failed**: Your API key is invalid or expired. Please check your OpenAI API key.")
+                st.session_state.api_key_valid = False
+            elif e.response.status_code == 429:
+                st.error("⏱️ **Rate Limited**: Too many requests. Please wait a moment and try again.")
+            else:
+                st.error(f"🌐 **API Error**: HTTP {e.response.status_code} - Please try again later.")
+        else:
+            st.error(f"🌐 **API Request Failed**: {str(e)}")
+        return None
+        
+    except requests.exceptions.RequestException as e:
+        st.error(f"🔗 **Network Error**: {str(e)}")
+        return None
 
+    try:
+        response_data = r.json()
+        if 'choices' not in response_data or not response_data['choices']:
+            st.error("❌ **Invalid Response**: No response from AI model.")
+            return None
+        return response_data["choices"][0]["message"]["content"].strip()
+        
+    except Exception as e:
+        st.error(f"❌ **Unexpected Error**: {str(e)}")
+        return None
+    
 def update_customer_profile(data):
-    """Update customer profile based on AI response"""
     if "customer_update" in data:
         update = data["customer_update"]
-        if update.get("interested_models"):
-            st.session_state.customer_profile["interested_models"] = update["interested_models"]
-        if update.get("budget_range"):
-            st.session_state.customer_profile["budget_range"] = update["budget_range"]
-        if update.get("priorities"):
-            st.session_state.customer_profile["priorities"] = update["priorities"]
+        for key, value in update.items():
+            if key in st.session_state.customer_profile and value:
+                st.session_state.customer_profile[key] = value
     
     if "stage" in data:
         st.session_state.customer_profile["stage"] = data["stage"]
     
-    # Check if this is a final confirmation after purchase approval
+    # Check for sale completion (more specific triggers)
     if (data.get("action") == "confirm" and 
-        ("congratulations" in data.get("message", "").lower() or 
-         "purchase is confirmed" in data.get("message", "").lower() or
-         "your purchase" in data.get("message", "").lower())):
+        ("congratulations" in data.get("message", "").lower() and
+         "purchase" in data.get("message", "").lower() and
+         "complete" in data.get("message", "").lower())):
         st.session_state.sale_completed = True
-        st.session_state.show_balloons = True
+        # Force rerun to immediately update UI
+        st.rerun()
 
 def render(d):
-    """Enhanced message rendering with action-specific formatting"""
     msg = d.get("message", "")
     act = d.get("action", "reply")
     data = d.get("data", {})
     
-    # Update customer profile
     update_customer_profile(d)
     
-    # Action-specific rendering
-    if act == "quote":
-        st.success(f"💰 {msg}")
-        if data.get("price"):
-            st.session_state.quote_history.append({
-                "model": data.get("models", ["Unknown"])[0],
-                "price": data["price"],
-                "timestamp": datetime.now()
-            })
-    elif act == "purchase_confirm":
-        # Display transaction summary
-        st.warning("📋 **PURCHASE CONFIRMATION**")
+    # Check for hybrid actions first (predefined intro + custom AI response)
+    if act in HYBRID_ACTIONS:
+        intro = HYBRID_ACTIONS[act]
+        # Combine predefined intro with AI's custom response
+        full_message = intro + msg
+        st.info(f"📊 {full_message}")
         
-        if data.get("transaction_summary"):
-            summary = data["transaction_summary"]
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("### Vehicle Details")
-                st.write(f"**Model:** {summary.get('model', 'RAV4')}")
-                if summary.get('original_price'):
-                    st.write(f"**Original Price:** ${summary.get('original_price', 28500):,}")
-                    if summary.get('discount'):
-                        st.write(f"**Discount:** -${summary.get('discount', 0):,}")
-                    if summary.get('trade_in_value'):
-                        st.write(f"**Trade-in Credit:** -${summary.get('trade_in_value', 0):,}")
-                st.write(f"**Final Price:** ${summary.get('final_price', summary.get('price', 28500)):,}")
-                
-            with col2:
-                st.markdown("### Payment Details")
-                st.write(f"**Total Due at Signing:** ${summary.get('total_due', 2000):,}")
-                if summary.get('trade_in_value'):
-                    st.write(f"**After Trade-in Applied**")
-            
-            st.markdown("---")
-            
-            if summary.get("discount") or summary.get("trade_in_value"):
-                st.markdown("### Applied Discounts")
-                if summary.get("discount"):
-                    st.write(f"✓ Manager's Special: -${summary.get('discount', 0):,}")
-                if summary.get("trade_in_value"):
-                    st.write(f"✓ Trade-in Value: -${summary.get('trade_in_value', 0):,}")
-            
-            st.markdown("---")
-            st.success(f"**Final Price: ${summary.get('final_price', summary.get('price', 28500)):,}**")
-            
+        # Show AI's custom next steps
+        if "next_steps" in d and d["next_steps"]:
+            st.markdown("**Your options:**")
+            for i, step in enumerate(d["next_steps"], 1):
+                st.markdown(f"{i}. {step}")
+        return
+    
+    # Check for fully predefined actions
+    if act in PREDEFINED_ACTIONS:
+        predefined = PREDEFINED_ACTIONS[act]
+        msg = predefined["message"]
+        # Show predefined message with special styling
+        if act == "fallback":
+            st.error(f"↩️ {msg}")
+        elif act == "forbidden_topic":
+            st.warning(f"🔄 {msg}")
+        elif act == "negotiation_limit":
+            st.warning(f"⛔ {msg}")
+        elif act in ["not_interested"]:
+            st.info(f"💡 {msg}")
+        
+        # Show predefined next steps
+        st.markdown("**Your options:**")
+        for i, step in enumerate(predefined["next_steps"], 1):
+            st.markdown(f"{i}. {step}")
+        return
+    
+    # Default action-based styling for custom responses
+    if act == "purchase_confirm":
+        st.warning("📋 **PURCHASE CONFIRMATION**")
         st.write(msg)
+        # Add purchase summary if available
+        if data.get("product") and data.get("price"):
+            st.success(f"**Product:** {data['product']}")
+            st.success(f"**Final Price:** ${data['price']}")
+    elif act in ["quote"]:
+        st.success(f"💰 {msg}")
     elif act == "compare":
         st.info(f"📊 {msg}")
     elif act == "negotiate":
         st.warning(f"🤝 {msg}")
-    elif act == "close":
-        st.info(f"✨ {msg}")
-    elif act == "confirm":
-        if "purchase" in msg.lower() or "thank you" in msg.lower():
+    elif act in ["close", "confirm"]:
+        st.success(f"✨ {msg}")
+        if act == "confirm":
             st.balloons()
-        st.success(f"🎉 {msg}")
     elif act == "recommend":
         st.info(f"⭐ {msg}")
-    elif act == "objection":
+    elif act in ["objection"]:
         st.warning(f"💡 {msg}")
-    elif act == "fallback":
-        st.error(f"↩️ {msg}")
     else:
         st.write(msg)
     
-    # Show next steps only if present and action is not confirm
+    # Save quote information - fix data extraction
+    if act in ["quote", "purchase_confirm"] and data.get("price"):
+        # Extract product name from various possible fields
+        product_name = "Item"
+        if data.get("product"):
+            product_name = data["product"]
+        elif data.get("models") and isinstance(data["models"], list) and data["models"]:
+            product_name = data["models"][0]
+        elif data.get("items") and isinstance(data["items"], list) and data["items"]:
+            product_name = data["items"][0]
+        
+        st.session_state.quote_history.append({
+            "item": product_name,
+            "price": data["price"],
+            "timestamp": datetime.now()
+        })
+    
+    # Show next steps (only if not predefined action)
     if "next_steps" in d and d["next_steps"] and act != "confirm":
         st.markdown("**Your options:**")
         for i, step in enumerate(d["next_steps"], 1):
             st.markdown(f"{i}. {step}")
 
-# ───────── Display chat history ─────────
+# Display conversation history
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# ───────── Sale completed state ─────────
+# Show completion message
 if st.session_state.sale_completed:
     st.markdown("---")
-    st.success("### 🎊 Congratulations on your new Toyota!")
-    st.info("Thank you for shopping with Toyota! Your sales specialist will contact you within 24 hours to finalize delivery details.")
-    
-    # Show final summary
-    if st.session_state.customer_profile["interested_models"]:
-        st.markdown(f"**Your Vehicle:** {st.session_state.customer_profile['interested_models'][-1]}")
+    st.success(f"### {PURCHASE_SUCCESS_TITLE}")
+    st.info(PURCHASE_SUCCESS_MESSAGE)
+    if st.session_state.customer_profile.get("interested_items"):
+        st.markdown(f"**Your Purchase:** {st.session_state.customer_profile['interested_items'][-1]}")
     if st.session_state.quote_history:
         latest_quote = st.session_state.quote_history[-1]
-        st.markdown(f"**Purchase Price:** ${latest_quote['price']:,}")
+        st.markdown(f"**Purchase Price:** ${latest_quote['price']}")
 
-# ───────── Main chat interface ─────────
-user = st.chat_input("What can I help you find today?")
-if user and not st.session_state.sale_completed:  # Only process input if sale not completed
+# Chat input
+user = st.chat_input(
+    CHAT_PLACEHOLDER_READY if st.session_state.api_key_valid else CHAT_PLACEHOLDER_NO_API, 
+    disabled=not st.session_state.api_key_valid
+)
+
+if user and not st.session_state.sale_completed and st.session_state.api_key_valid:
     st.session_state.messages.append({"role": "user", "content": user})
     with st.chat_message("user"):
         st.markdown(user)
-    
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             raw = call_llm([sys_msg()] + st.session_state.messages)
-            data = parse_obj(raw)
-            
-            if isinstance(data, dict) and "action" in data:
-                render(data)
-                # Store the full response for context
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": data.get("message", raw)
-                })
-            else:
-                # Fallback response
-                fallback = "I'd love to help you find the perfect Toyota! Here are your options:\n1. Explore our model lineup\n2. Discuss your specific needs"
-                st.write(fallback)
-                st.session_state.messages.append({"role": "assistant", "content": fallback})
+            if raw:
+                data = parse_obj(raw)
+                if isinstance(data, dict) and "action" in data:
+                    render(data)
+                    st.session_state.messages.append({"role": "assistant", "content": data.get("message", raw)})
+                else:
+                    fallback = f"I'd love to help you find the perfect {BUSINESS_NAME} product! How can I assist you today?"
+                    st.write(fallback)
+                    st.session_state.messages.append({"role": "assistant", "content": fallback})
 
-# Show reset button below chat input if sale is completed
+# Reset button (only show when sale is completed)
 if st.session_state.sale_completed:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("Reset Dialogue", type="primary", use_container_width=True):
-            # Reset all session state
+        if st.button(FINAL_RESET_BUTTON_LABEL, type="primary", use_container_width=True):
+            # Save API key before reset
+            saved_key = st.session_state.saved_api_key
+            # Reset conversation state
             st.session_state.messages = []
-            st.session_state.customer_profile = {
-                "interested_models": [],
-                "budget_range": None,
-                "priorities": [],
-                "stage": "discovery"
-            }
+            st.session_state.customer_profile = CUSTOMER_PROFILE_FIELDS.copy()
             st.session_state.quote_history = []
             st.session_state.sale_completed = False
-            st.session_state.show_balloons = False
-            st.rerun()
-
-# ───────── Quick action buttons ─────────
-if not st.session_state.messages and not st.session_state.sale_completed:
-    st.markdown("### Quick Start Options:")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("🚙 Browse SUVs"):
-            st.session_state.messages.append({"role": "user", "content": "Show me your SUVs"})
-            st.rerun()
-    with col2:
-        if st.button("💰 Best Deals"):
-            st.session_state.messages.append({"role": "user", "content": "What are your best deals right now?"})
-            st.rerun()
-    with col3:
-        if st.button("🔍 Help Me Choose"):
-            st.session_state.messages.append({"role": "user", "content": "I'm not sure what I need, can you help?"})
+            # Restore API key
+            st.session_state.saved_api_key = saved_key
             st.rerun()
