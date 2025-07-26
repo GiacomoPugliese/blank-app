@@ -7,12 +7,36 @@ from datetime import datetime
 # =============================================================================
 
 # Business Information
-BUSINESS_NAME = "Toyota"
-BUSINESS_EMOJI = "🚗"
-SALESMAN_TITLE = "Toyota Sales Specialist"
-GREETING = "Hi! I'm here to help you find your perfect Toyota. Let's make this easy and enjoyable!"
+# TODO: Replace these 4 fields to change your salesperson's identity and business type
+BUSINESS_NAME = "Toyota"  # Your company name (appears in messages and titles)
+BUSINESS_EMOJI = "🚗"  # Single emoji representing your business (🍕 for pizza, 📚 for books, etc.)
+SALESMAN_TITLE = "Toyota Sales Specialist"  # Job title shown at top of page
+GREETING = "Hi! I'm here to help you find your perfect Toyota. Let's make this easy and enjoyable!"  # Welcome message customers see
 
 # Product Inventory/Knowledge Base
+# TODO: Replace this inventory with your own business products!
+# 
+# Format explanation (follow this EXACT pattern):
+# ProductName | Category | Price | Spec1: value | Features: feature1, feature2, feature3
+#
+# Field breakdown:
+# • ProductName: Short name (no spaces work best, like "iPhone15" or "Camry")
+# • Category: What type of product (like "Smartphone", "Sedan", "Laptop") 
+# • Price: Just the number, no $ sign or commas (like 21000, not $21,000)
+# • Spec1: Any technical spec relevant to your business (MPG for cars, Storage for phones, etc.)
+# • Features: List 2-4 key selling points separated by commas
+#
+# Organize products into ## Categories for better readability.
+# The AI will use this data to:
+#   - Answer questions about products and prices  
+#   - Make recommendations based on customer needs
+#   - Compare different options
+#   - Quote accurate prices during sales process
+#
+# Example for different businesses:
+# Pizza Shop: "Margherita | Classic Pizza | 12 | Size: 14-inch | Features: Fresh mozzarella, basil, tomato sauce"
+# Bookstore: "HarryPotter1 | Fantasy Novel | 15 | Pages: 309 | Features: Bestseller, Young Adult, Magic adventure"
+
 DEFAULT_KB = textwrap.dedent("""
 # TOYOTA VEHICLE INVENTORY
 
@@ -37,22 +61,24 @@ Sienna     | Hybrid Minivan| 38000 | MPG: 36/36 | Features: AWD standard, 8 pass
 bZ4X       | Electric SUV  | 43000 | Range: 252mi | Features: X-MODE AWD, 10yr battery warranty
 """).strip()
 
-# Customer Profile Fields (what info to track about customers)
+# Customer Profile Fields
+# TODO: Customize what info to track about customers (these become variables the AI can reference)
 CUSTOMER_PROFILE_FIELDS = {
     "interested_items": [],      # What products they're interested in
-    "budget_range": None,        # Their budget
+    "budget_range": None,        # Their budget range
     "preferences": [],           # What features/qualities they want
-    "stage": "discovery"         # Where they are in the sales process
+    "stage": "discovery"         # Where they are in the sales process (discovery/comparison/negotiation/closing)
 }
 
-# Sales Topics (what you can discuss)
+# Sales Topics
+# TODO: Define what your salesperson can discuss (keeps conversations focused)
 ALLOWED_TOPICS = (
     "product exploration, product comparison, feature details, pricing and discounts, "
     "trade-in evaluation, purchase process, delivery timeline, warranty information, "
     "and closing the sale"
 )
 
-# Forbidden Topics (redirect these conversations)
+# TODO: List topics to redirect away from (prevents complex discussions your AI can't handle)
 FORBIDDEN_TOPICS = (
     "financing, loans, interest rates, monthly payments, credit checks, lease terms, "
     "APR, payment plans, down payments, payment method discussions, contact details, "
@@ -60,7 +86,18 @@ FORBIDDEN_TOPICS = (
     "service appointments, or any post-purchase logistics"
 )
 
-# Predefined Action Responses (customize these for different behaviors)
+
+# Predefined Action Responses
+# TODO: Customize scripted responses for consistent handling of common situations
+# Why use these? Some conversations need predictable, professional responses rather than 
+# unpredictable AI creativity. These ensure your salesperson always handles difficult 
+# situations the same way (like when customers go off-topic or ask forbidden questions).
+# 
+# The AI decides when to use these based on SYSTEM_PROMPT instructions below. When the AI
+# returns action="fallback" (for example), the render() function shows the exact scripted
+# message instead of whatever the AI wrote.
+#
+# Format: Each action needs "message" (what to say) and "next_steps" (2 options for customer)
 PREDEFINED_ACTIONS = {
     "fallback": {
         "message": f"That's interesting! Speaking of interesting, have you seen our latest {BUSINESS_NAME} products? They're really turning heads!",
@@ -81,11 +118,30 @@ PREDEFINED_ACTIONS = {
 }
 
 # Hybrid Actions (use predefined intro + custom AI response)
+# TODO: Hybrid actions combine scripted intro with custom AI response (best of both worlds)
 HYBRID_ACTIONS = {
     "competitor_mention": f"Great choice to consider! Let me show you how {BUSINESS_NAME} compares - you might be surprised by our advantages. "
 }
 
 # Salesman Persona and Behavior
+# TODO: This is the SYSTEM_PROMPT - the "personality instructions" sent to the AI with every message
+# Think of this as training your AI employee. Everything here determines how your salesperson acts,
+# what they can discuss, and how they handle different situations.
+#
+# Key sections to customize for your business:
+# • CORE BEHAVIORS: Change personality traits (friendly vs professional, pushy vs helpful, etc.)
+# • SALES PROCESS: Modify the 4-step process for different business types
+# • CONVERSATION RULES: Adjust response style and length
+# • PREDEFINED RESPONSES: Lists when to use your scripted actions from above (like "fallback", "forbidden_topic"; must match EXACTLY)
+# • HYBRID RESPONSES: When to combine scripted intro + custom AI response (like competitor_mention; must match EXACTLY)
+# • OUTPUT section: This tells AI what JSON format to return (don't change this part)
+#
+# The AI uses your ALLOWED_TOPICS, FORBIDDEN_TOPICS, and PREDEFINED_ACTIONS from above to
+# know when to switch from creative responses to scripted ones. The render() function then
+# displays whatever action the AI chooses.
+#
+# Important: The {BUSINESS_NAME} and {ALLOWED_TOPICS} get automatically filled in from your
+# variables above, so if you change "Toyota" to "Pizza Palace" up top, it updates here too!
 SYSTEM_PROMPT = f"""You are an expert {BUSINESS_NAME} sales specialist with 15+ years of experience. Your goal is to guide customers smoothly through the buying journey while building trust and excitement.
 
 IMPORTANT SCOPE RESTRICTIONS:
@@ -222,8 +278,9 @@ def validate_api_key(key):
     if not key:
         return False, "Please enter your OpenAI API key"
     
-    if not key.startswith("sk-"):
-        return False, "Invalid API key format. OpenAI keys start with 'sk-'"
+    expected_prefix = "sk" + "-"  
+    if not key.startswith(expected_prefix):
+        return False, f"Invalid API key format. OpenAI keys start with '{expected_prefix}'"
     
     if len(key) < 20:
         return False, "API key appears too short. Please check your key"
