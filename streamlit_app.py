@@ -321,7 +321,6 @@ st.caption(GREETING)
 # Show API key requirement message if not valid
 if not st.session_state.api_key_valid:
     st.warning(f"🔑 **API Key Required**: Please enter a valid OpenAI API key in the sidebar to start chatting with your {BUSINESS_NAME} sales specialist.")
-    st.info("💡 **How to get an API key:**\n1. Visit [OpenAI Platform](https://platform.openai.com/api-keys)\n2. Sign in or create an account\n3. Generate a new API key\n4. Copy and paste it in the sidebar")
 
 # AI Configuration
 model = "gpt-4o"
